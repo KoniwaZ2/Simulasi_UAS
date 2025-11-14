@@ -29,6 +29,27 @@ class CartsViewSet(viewsets.ModelViewSet):
     serializer_class = CartSerializer
     permission_classes = [AllowAny]
     
+    def retrieve(self, request, pk=None):
+        """Override retrieve to search by user_id instead of cart id"""
+        try:
+            carts = Carts.objects.filter(user_id=pk).order_by('-created_at')
+            cart = None
+            for existing_cart in carts:
+                if not Checkouts.objects.filter(cart=existing_cart).exists():
+                    cart = existing_cart
+                    break
+
+            if not cart:
+                cart = Carts.objects.create(user_id=pk)
+
+            serializer = self.get_serializer(cart)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {'error': str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
     @action(detail=True, methods=['post'])
     def add_item(self, request, pk=None):
         """Add item to cart"""
@@ -117,8 +138,19 @@ class CartItemsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Get or create cart for user
-        cart, created = Carts.objects.get_or_create(user_id=user_id)
+        # Get or create the latest cart without checkout for this user
+        carts = Carts.objects.filter(user_id=user_id).order_by('-created_at')
+        cart = None
+        for existing_cart in carts:
+            if not Checkouts.objects.filter(cart=existing_cart).exists():
+                cart = existing_cart
+                break
+
+        if not cart:
+            cart = Carts.objects.create(user_id=user_id)
+            created = True
+        else:
+            created = False
         
         # Get or create cart item
         cart_item, item_created = CartItems.objects.get_or_create(
@@ -161,6 +193,12 @@ class CheckoutsViewSet(viewsets.ModelViewSet):
                 {'error': 'Cart not found'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
+
+        if Checkouts.objects.filter(cart=cart).exists():
+            return Response(
+                {'error': 'This cart has already been checked out. Please use a fresh cart.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         # Calculate total amount automatically
         total_amount = sum(
@@ -181,9 +219,31 @@ class CheckoutsViewSet(viewsets.ModelViewSet):
                 product=cart_item.product,
                 quantity=cart_item.quantity
             )
+
+        # Clear cart items after checkout
+        cart.cartitems_set.all().delete()
+
+        # Ensure user has a fresh cart available for next purchase
+        Carts.objects.create(user=cart.user)
         
         serializer = self.get_serializer(checkout)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='user/(?P<user_id>[^/.]+)')
+    def history(self, request, user_id=None):
+        """Return all checkouts for a specific user"""
+        if not user_id:
+            return Response(
+                {'error': 'User ID is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        checkouts = self.queryset.filter(
+            cart__user_id=user_id
+        ).order_by('-checkout_date')
+
+        serializer = self.get_serializer(checkouts, many=True)
+        return Response(serializer.data)
 
 
 class CheckoutItemsViewSet(viewsets.ModelViewSet):

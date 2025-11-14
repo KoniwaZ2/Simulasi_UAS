@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   getSellerProducts,
   createProduct,
@@ -6,8 +6,18 @@ import {
   deleteProduct,
 } from "../services/products";
 
-function SellerPage() {
+const formatCurrency = (value) => {
+  const numeric = Number(value) || 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  }).format(numeric);
+};
+
+function SellerPage({ user, onLogout }) {
   const [products, setProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -18,30 +28,68 @@ function SellerPage() {
     price: "",
     stock: "",
   });
+  const [searchTerm, setSearchTerm] = useState("");
   const [formError, setFormError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // Get seller ID from localStorage
-  const userData = localStorage.getItem("user_data");
-  const sellerId = userData ? JSON.parse(userData).id : null;
+  const fallbackUser = (() => {
+    try {
+      const raw = localStorage.getItem("user_data");
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      console.warn("Unable to parse user data", err);
+      return null;
+    }
+  })();
+
+  const sellerProfile = user || fallbackUser;
+  const sellerId = sellerProfile?.id ?? null;
+  const sellerName =
+    sellerProfile?.first_name || sellerProfile?.username || "Seller";
   const token = localStorage.getItem("access_token");
 
   // Fetch seller's products on mount
   useEffect(() => {
-    fetchSellerProducts();
-  }, []);
+    if (sellerId) {
+      fetchSellerProducts();
+    } else {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellerId]);
+
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredProducts(products);
+      return;
+    }
+    const term = searchTerm.toLowerCase();
+    setFilteredProducts(
+      products.filter((product) => {
+        const nameMatch = product.product_name?.toLowerCase().includes(term);
+        const descMatch = product.description?.toLowerCase().includes(term);
+        return nameMatch || descMatch;
+      })
+    );
+  }, [products, searchTerm]);
 
   const fetchSellerProducts = async () => {
     try {
       setLoading(true);
       setError(null);
       if (sellerId) {
-        const response = await fetch(
-          `http://localhost:8000/api/products/?seller=${sellerId}`
-        );
-        if (!response.ok) throw new Error("Failed to fetch products");
-        const data = await response.json();
-        setProducts(Array.isArray(data) ? data : data.results || []);
+        const data = await getSellerProducts(sellerId);
+        const normalized = Array.isArray(data) ? data : data.results || [];
+        const ownedProducts = normalized.filter((product) => {
+          const sellerField = product.seller;
+          if (sellerField === undefined || sellerField === null) return false;
+          if (typeof sellerField === "object") {
+            return String(sellerField.id) === String(sellerId);
+          }
+          return String(sellerField) === String(sellerId);
+        });
+        setProducts(ownedProducts);
+        setFilteredProducts(ownedProducts);
       }
     } catch (err) {
       setError("Failed to load products. Please try again.");
@@ -83,6 +131,18 @@ function SellerPage() {
     setShowForm(true);
   };
 
+  const stats = useMemo(() => {
+    const totalProducts = products.length;
+    const totalStock = products.reduce(
+      (sum, product) => sum + (Number(product.stock) || 0),
+      0
+    );
+    const lowStock = products.filter(
+      (product) => (Number(product.stock) || 0) < 5
+    ).length;
+    return { totalProducts, totalStock, lowStock };
+  }, [products]);
+
   const handleSubmitForm = async (e) => {
     e.preventDefault();
     setFormError(null);
@@ -115,33 +175,10 @@ function SellerPage() {
       };
 
       if (editingProduct) {
-        // Update existing product
-        const response = await fetch(
-          `http://localhost:8000/api/products/${editingProduct.id}/`,
-          {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(productPayload),
-          }
-        );
-
-        if (!response.ok) throw new Error("Failed to update product");
+        await updateProduct(editingProduct.id, productPayload, token);
         setSuccessMessage("Product updated successfully!");
       } else {
-        // Create new product
-        const response = await fetch("http://localhost:8000/api/products/", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(productPayload),
-        });
-
-        if (!response.ok) throw new Error("Failed to create product");
+        await createProduct(productPayload, token);
         setSuccessMessage("Product added successfully!");
       }
 
@@ -162,17 +199,7 @@ function SellerPage() {
     }
 
     try {
-      const response = await fetch(
-        `http://localhost:8000/api/products/${productId}/`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (!response.ok) throw new Error("Failed to delete product");
+      await deleteProduct(productId, token);
       setSuccessMessage("Product deleted successfully!");
       fetchSellerProducts();
     } catch (err) {
@@ -195,223 +222,232 @@ function SellerPage() {
 
   if (!sellerId) {
     return (
-      <div className="min-h-screen bg-gray-50 p-4">
-        <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded-lg shadow-md">
-          <p className="text-center text-gray-600">
-            Please log in to access the seller dashboard.
-          </p>
+      <div className="seller-empty-state">
+        <div className="seller-empty-card">
+          <p>Please log in to access the seller dashboard.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-8 flex justify-between items-center">
-          <div>
-            <h1 className="text-4xl font-bold text-gray-900">
-              Seller Dashboard
-            </h1>
-            <p className="text-gray-600 mt-2">
-              Manage your products and inventory
-            </p>
+    <div className="seller-dashboard">
+      <header className="seller-hero">
+        <div>
+          <p className="seller-hero__eyebrow">Seller workspace</p>
+          <h1>Hi, {sellerName}</h1>
+          <p>Control your catalog, pricing, and stock in a single view.</p>
+          <div className="seller-hero__meta">
+            <span>{stats.totalProducts} live products</span>
+            <span>Updated {new Date().toLocaleTimeString()}</span>
           </div>
-          <button
-            onClick={handleAddNewProduct}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold"
-          >
-            + Add New Product
+        </div>
+        <div className="seller-hero__actions">
+          <button className="btn btn-secondary" onClick={fetchSellerProducts}>
+            Refresh
           </button>
+          <button className="btn btn-primary" onClick={handleAddNewProduct}>
+            + New product
+          </button>
+          {onLogout && (
+            <button className="btn btn-ghost" onClick={onLogout}>
+              Logout
+            </button>
+          )}
+        </div>
+      </header>
+
+      <section className="seller-panel">
+        <div className="seller-panel__header">
+          <div className="seller-search">
+            <span>🔍</span>
+            <input
+              type="text"
+              placeholder="Search product name or description"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="seller-panel__actions">
+            <button className="btn btn-light" onClick={fetchSellerProducts}>
+              Sync inventory
+            </button>
+            <button className="btn btn-primary" onClick={handleAddNewProduct}>
+              + Add product
+            </button>
+          </div>
         </div>
 
-        {/* Messages */}
-        {error && (
-          <div className="mb-4 p-4 bg-red-100 text-red-700 rounded-lg border border-red-300">
-            {error}
-          </div>
-        )}
+        {error && <div className="seller-message error">{error}</div>}
         {successMessage && (
-          <div className="mb-4 p-4 bg-green-100 text-green-700 rounded-lg border border-green-300">
-            {successMessage}
-          </div>
+          <div className="seller-message success">{successMessage}</div>
         )}
 
-        {/* Form Modal */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-              <div className="p-6">
-                <h2 className="text-2xl font-bold mb-4">
-                  {editingProduct ? "Edit Product" : "Add New Product"}
-                </h2>
-
-                {formError && (
-                  <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
-                    {formError}
-                  </div>
-                )}
-
-                <form onSubmit={handleSubmitForm} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Product Name *
-                    </label>
-                    <input
-                      type="text"
-                      name="product_name"
-                      value={formData.product_name}
-                      onChange={handleInputChange}
-                      className="w-full border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter product name"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description *
-                    </label>
-                    <textarea
-                      name="description"
-                      value={formData.description}
-                      onChange={handleInputChange}
-                      className="w-full border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter product description"
-                      rows="3"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Price ($) *
-                      </label>
-                      <input
-                        type="number"
-                        name="price"
-                        value={formData.price}
-                        onChange={handleInputChange}
-                        className="w-full border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="0.00"
-                        step="0.01"
-                        min="0"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Stock *
-                      </label>
-                      <input
-                        type="number"
-                        name="stock"
-                        value={formData.stock}
-                        onChange={handleInputChange}
-                        className="w-full border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="0"
-                        min="0"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={handleCancelForm}
-                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                    >
-                      {editingProduct ? "Update" : "Add"} Product
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Products List */}
         {loading ? (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            <p className="mt-4 text-gray-600">Loading products...</p>
+          <div className="seller-loading">
+            <div className="spinner-large" />
+            <p>Loading your products...</p>
           </div>
-        ) : products.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-gray-600 mb-4">
-              You haven't added any products yet.
+        ) : filteredProducts.length === 0 ? (
+          <div className="seller-empty-card">
+            <h3>No products found</h3>
+            <p>
+              {products.length === 0
+                ? "Start by adding your first product to the catalog."
+                : "Try adjusting your search or add something new."}
             </p>
-            <button
-              onClick={handleAddNewProduct}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Add Your First Product
+            <button className="btn btn-primary" onClick={handleAddNewProduct}>
+              Create product
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {products.map((product) => (
-              <div
-                key={product.id}
-                className="bg-white rounded-lg shadow-md hover:shadow-lg transition overflow-hidden"
-              >
-                <div className="p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-2">
-                    {product.product_name}
-                  </h3>
-                  <p className="text-gray-600 text-sm mb-4 line-clamp-2">
-                    {product.description}
+          <div className="seller-product-grid">
+            {filteredProducts.map((product) => {
+              const createdDate = product.created_at
+                ? new Date(product.created_at)
+                : null;
+              const inStock = (Number(product.stock) || 0) > 0;
+              return (
+                <article key={product.id} className="seller-product-card">
+                  <header>
+                    <h3>{product.product_name}</h3>
+                    <span
+                      className={`badge ${
+                        inStock ? "badge-success" : "badge-danger"
+                      }`}
+                    >
+                      {inStock ? "In stock" : "Out of stock"}
+                    </span>
+                  </header>
+                  <p className="seller-product-desc">
+                    {product.description || "No description provided."}
                   </p>
-
-                  <div className="grid grid-cols-2 gap-4 mb-4 py-4 border-y border-gray-200">
+                  <div className="seller-product-meta">
                     <div>
-                      <p className="text-sm text-gray-500">Price</p>
-                      <p className="text-xl font-bold text-gray-900">
-                        ${parseFloat(product.price).toFixed(2)}
+                      <p className="meta-label">Price</p>
+                      <p className="meta-value">
+                        {formatCurrency(product.price)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-sm text-gray-500">Stock</p>
-                      <p
-                        className={`text-xl font-bold ${
-                          product.stock > 0 ? "text-green-600" : "text-red-600"
-                        }`}
-                      >
-                        {product.stock}
+                      <p className="meta-label">Stock</p>
+                      <p className="meta-value">{product.stock}</p>
+                    </div>
+                    <div>
+                      <p className="meta-label">Added</p>
+                      <p className="meta-value">
+                        {createdDate ? createdDate.toLocaleDateString() : "-"}
                       </p>
                     </div>
                   </div>
-
-                  <p className="text-xs text-gray-400 mb-4">
-                    Added: {new Date(product.created_at).toLocaleDateString()}
-                  </p>
-
-                  <div className="flex gap-2">
+                  <footer className="seller-product-actions">
                     <button
+                      className="btn btn-light"
                       onClick={() => handleEditProduct(product)}
-                      className="flex-1 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition font-medium text-sm"
                     >
                       Edit
                     </button>
                     <button
+                      className="btn btn-danger"
                       onClick={() => handleDeleteProduct(product.id)}
-                      className="flex-1 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition font-medium text-sm"
                     >
                       Delete
                     </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+                  </footer>
+                </article>
+              );
+            })}
           </div>
         )}
-      </div>
+      </section>
+
+      {showForm && (
+        <div className="seller-modal" role="dialog" aria-modal="true">
+          <div className="seller-modal__overlay" onClick={handleCancelForm} />
+          <div className="seller-modal__panel">
+            <header className="seller-modal__header">
+              <div>
+                <p className="seller-modal__eyebrow">
+                  {editingProduct ? "Update" : "Create"}
+                </p>
+                <h2>{editingProduct ? "Update product" : "Add new product"}</h2>
+              </div>
+              <button
+                className="seller-modal__close"
+                onClick={handleCancelForm}
+              >
+                ×
+              </button>
+            </header>
+            {formError && (
+              <div className="seller-message error">{formError}</div>
+            )}
+            <form className="seller-form" onSubmit={handleSubmitForm}>
+              <label className="seller-field">
+                <span>Product name *</span>
+                <input
+                  type="text"
+                  name="product_name"
+                  value={formData.product_name}
+                  onChange={handleInputChange}
+                  placeholder="e.g. Wireless earbuds"
+                  required
+                />
+              </label>
+              <label className="seller-field">
+                <span>Description *</span>
+                <textarea
+                  name="description"
+                  value={formData.description}
+                  onChange={handleInputChange}
+                  rows="3"
+                  placeholder="Tell shoppers why this product stands out"
+                  required
+                />
+              </label>
+              <div className="seller-form__row">
+                <label className="seller-field">
+                  <span>Price ($) *</span>
+                  <input
+                    type="number"
+                    name="price"
+                    min="0"
+                    step="0.01"
+                    value={formData.price}
+                    onChange={handleInputChange}
+                    placeholder="39.99"
+                    required
+                  />
+                </label>
+                <label className="seller-field">
+                  <span>Stock *</span>
+                  <input
+                    type="number"
+                    name="stock"
+                    min="0"
+                    value={formData.stock}
+                    onChange={handleInputChange}
+                    placeholder="100"
+                    required
+                  />
+                </label>
+              </div>
+              <div className="seller-form__actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCancelForm}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  {editingProduct ? "Save changes" : "Add product"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

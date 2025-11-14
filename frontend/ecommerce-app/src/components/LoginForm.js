@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
+import { login as loginApi } from "../services/login";
 
 function Login({ onLogin, onCancel, loginToEdits }) {
   const emailInputRef = useRef(null);
@@ -6,6 +7,10 @@ function Login({ onLogin, onCancel, loginToEdits }) {
     email: "",
     password: "",
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
   useEffect(() => {
     if (loginToEdits) {
       setFormData({
@@ -18,10 +23,13 @@ function Login({ onLogin, onCancel, loginToEdits }) {
         password: "",
       });
     }
-    if (emailInputRef.current) {
-      emailInputRef.current.value = "";
-    }
   }, [loginToEdits]);
+
+  useEffect(() => {
+    if (emailInputRef.current) {
+      emailInputRef.current.focus();
+    }
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -33,48 +41,128 @@ function Login({ onLogin, onCancel, loginToEdits }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    onLogin(formData);
-    setFormData({
-      email: "",
-      password: "",
-    });
+    setFormError("");
+    setIsSubmitting(true);
+    try {
+      const data = await loginApi(formData.email, formData.password);
+      if (onLogin) {
+        await onLogin(data);
+      }
+      setFormData({ email: "", password: "" });
+    } catch (error) {
+      const apiMessage =
+        error?.response?.data?.error ||
+        error?.message ||
+        "Unable to login. Please try again.";
+      setFormError(apiMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className="login-container">
-      <h2>Login</h2>
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="email">Email:</label>
-          <input
-            type="email"
-            id="email"
-            name="email"
-            ref={emailInputRef}
-            value={formData.email}
-            onChange={handleChange}
-            required
-          />
+    <section className="login-page">
+      <div className="login-shell">
+        <div className="login-hero">
+          <div className="brand-pill">Simulasi UAS</div>
+          <h1>
+            Welcome back to
+            <br /> your smart commerce hub
+          </h1>
+          <p>
+            Track inventory, manage carts, and check out faster with the same
+            clean workspace you see after signing in.
+          </p>
         </div>
-        <div className="form-group">
-          <label htmlFor="password">Password:</label>
-          <input
-            type="password"
-            id="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            required
-          />
+        <div className="login-form-panel">
+          <header className="login-header">
+            <div>
+              <p className="eyebrow">login Portal</p>
+              <h2>Sign in to continue</h2>
+              <p className="subtext">
+                Use the same credentials you registered with to access the
+                dashboard experience.
+              </p>
+            </div>
+            <div className="shield">Secure</div>
+          </header>
+
+          {formError && <div className="form-error">⚠️ {formError}</div>}
+
+          <form className="login-form" onSubmit={handleSubmit}>
+            <label
+              className={`floating ${formData.email ? "floating--active" : ""}`}
+            >
+              <input
+                ref={emailInputRef}
+                type="email"
+                name="email"
+                className="input"
+                placeholder="you@example.com"
+                value={formData.email}
+                onChange={handleChange}
+                required
+                autoComplete="email"
+              />
+              <span className="floating-label">Email address</span>
+            </label>
+
+            <label
+              className={`floating ${
+                formData.password ? "floating--active" : ""
+              }`}
+            >
+              <div className="password-field">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  className="input"
+                  placeholder="••••••••"
+                  value={formData.password}
+                  onChange={handleChange}
+                  required
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="toggle-visibility"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+              <span className="floating-label">Password</span>
+            </label>
+
+            <div className="remember-row">
+              <label>
+                <input type="checkbox" /> Remember me
+              </label>
+              <button type="button" className="ghost-link">
+                Forgot password?
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              className="login-button"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? "Signing in..." : "Enter dashboard"}
+            </button>
+          </form>
+
+          {onCancel && (
+            <p className="auth-switch">
+              New to the platform?{" "}
+              <button type="button" onClick={onCancel}>
+                Create an account
+              </button>
+            </p>
+          )}
         </div>
-        <button type="submit">Login</button>
-        {onCancel && (
-          <button type="button" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
-      </form>
-    </div>
+      </div>
+    </section>
   );
 }
 

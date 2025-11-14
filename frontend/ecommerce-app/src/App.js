@@ -2,15 +2,16 @@ import React, { useState, useEffect } from "react";
 import "./App.css";
 import RegisterForm from "./components/RegisterForm";
 import LoginForm from "./components/LoginForm";
-// import SellerPage from "./components/SellerPage";
-// import BuyerPage from "./components/BuyerPage";
-import { login } from "./services/login";
+import SellerPage from "./components/SellerPage";
+import BuyerPage from "./components/BuyerPage";
 import { registerUser } from "./services/register";
+import { getCart } from "./services/cart";
 
 function App() {
   const [user, setUser] = useState(null);
   const [showLogin, setShowLogin] = useState(true);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [cartData, setCartData] = useState(null);
 
   useEffect(() => {
     const checkExtistingAuth = () => {
@@ -21,6 +22,9 @@ function App() {
         try {
           const userData = JSON.parse(storedUser);
           setUser(userData);
+          if (userData.role === "customer") {
+            fetchCartData(userData, accessToken);
+          }
         } catch (error) {
           console.error("Failed to parse user data from localStorage:", error);
           localStorage.removeItem("user_data");
@@ -34,13 +38,28 @@ function App() {
     checkExtistingAuth();
   }, []);
 
-  const handleLoginSubmit = async (formData) => {
+  const fetchCartData = async (userData, token) => {
     try {
-      const data = await login(formData.email, formData.password);
-      console.log("Login response:", data);
-      if (data.token) {
-        localStorage.setItem("access_token", data.token);
-        localStorage.setItem("refresh_token", data.refresh_token);
+      console.log("Fetching cart for user ID:", userData.id);
+      const cart = await getCart(userData.id, token);
+      console.log("Cart data received:", cart);
+      setCartData(cart);
+    } catch (cartError) {
+      console.error("Failed to fetch cart:", cartError);
+      console.error("Cart error details:", cartError.response?.data);
+    }
+  };
+
+  const handleLoginSuccess = async (data) => {
+    try {
+      const accessToken = data.access;
+      const refreshToken = data.refresh;
+
+      if (accessToken) {
+        localStorage.setItem("access_token", accessToken);
+      }
+      if (refreshToken) {
+        localStorage.setItem("refresh_token", refreshToken);
       }
       const userData = {
         id: data.id,
@@ -53,8 +72,14 @@ function App() {
       };
       localStorage.setItem("user_data", JSON.stringify(userData));
       setUser(userData);
+
+      if (userData.role === "customer") {
+        await fetchCartData(userData, accessToken);
+      } else {
+        setCartData(null);
+      }
     } catch (error) {
-      console.error("Login failed:", error);
+      console.error("Post-login handling failed:", error);
       throw error;
     }
   };
@@ -65,6 +90,7 @@ function App() {
         formData.username,
         formData.email,
         formData.password,
+        formData.password_confirmation,
         formData.first_name,
         formData.last_name,
         formData.phone_number,
@@ -94,68 +120,21 @@ function App() {
   return (
     <div className="App">
       {user ? (
-        <div>
-          <div
-            style={{
-              padding: "20px",
-              background: "#f5f5f5",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <h2>
-              Welcome, {user.first_name}! ({user.role})
-            </h2>
-            <button
-              onClick={handleLogout}
-              style={{
-                padding: "10px 20px",
-                background: "#ff6b6b",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: "pointer",
-              }}
-            >
-              Logout
-            </button>
-          </div>
-          <div style={{ padding: "40px", textAlign: "center" }}>
-            <h3>Login Successful!</h3>
-            <p>User ID: {user.id}</p>
-            <p>Username: {user.username}</p>
-            <p>Email: {user.email}</p>
-            <p>Phone: {user.phone_number}</p>
-            <p>Role: {user.role}</p>
-            <p style={{ marginTop: "20px", color: "#666" }}>
-              {user.role === "seller" ? "Seller Page" : "Buyer Page"} - Coming
-              Soon!
-            </p>
-          </div>
-        </div>
+        user.role === "seller" ? (
+          <SellerPage user={user} onLogout={handleLogout} />
+        ) : (
+          <BuyerPage user={user} cartData={cartData} onLogout={handleLogout} />
+        )
       ) : showLogin ? (
-        <div>
-          <LoginForm
-            onLogin={handleLoginSubmit}
-            onCancel={() => setShowLogin(false)}
-          />
-          <p>
-            Don't have an account?{" "}
-            <button onClick={() => setShowLogin(false)}>Register here</button>
-          </p>
-        </div>
+        <LoginForm
+          onLogin={handleLoginSuccess}
+          onCancel={() => setShowLogin(false)}
+        />
       ) : (
-        <div>
-          <RegisterForm
-            onRegister={handleRegisterSubmit}
-            onCancel={() => setShowLogin(true)}
-          />
-          <p>
-            Already have an account?{" "}
-            <button onClick={() => setShowLogin(true)}>Login here</button>
-          </p>
-        </div>
+        <RegisterForm
+          onRegister={handleRegisterSubmit}
+          onCancel={() => setShowLogin(true)}
+        />
       )}
     </div>
   );

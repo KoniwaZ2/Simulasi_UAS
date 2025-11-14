@@ -1,11 +1,12 @@
 import axios from "axios";
 
-const API_URL = "http://localhost:8000/api/users/";
+const API_URL = "http://localhost:8000/api/users/register/";
 
 export const registerUser = async (
   username,
   email,
   password,
+  password_confirmation,
   first_name,
   last_name,
   phone_number,
@@ -16,13 +17,14 @@ export const registerUser = async (
       username,
       email,
       password,
+      password_confirmation,
       first_name,
       last_name,
       phone_number,
       role,
     };
-    
-    const response = await axios.post(`${API_URL}register/`, payload);
+
+    const response = await axios.post(`${API_URL}`, payload);
     return response.data;
   } catch (error) {
     throw error;
