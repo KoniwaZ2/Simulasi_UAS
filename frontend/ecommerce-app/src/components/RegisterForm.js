@@ -102,18 +102,6 @@ function RegisterForm({ onRegister, onCancel, registerToEdit }) {
             Your profile connects directly with the buyer dashboard, letting you
             browse products, manage carts, and track checkouts seamlessly.
           </p>
-          <div className="hero-grid">
-            <div className="hero-card">
-              <span className="hero-label">Secure Sign-up</span>
-              <strong>2FA ready</strong>
-              <small>Protected with encrypted tokens</small>
-            </div>
-            <div className="hero-card">
-              <span className="hero-label">Instant Access</span>
-              <strong>1-click</strong>
-              <small>Jump straight into your dashboard</small>
-            </div>
-          </div>
         </div>
 
         <div className="login-form-panel register-form-panel">
