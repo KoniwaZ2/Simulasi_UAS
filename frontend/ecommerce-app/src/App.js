@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
 import RegisterForm from "./components/RegisterForm";
-import Login from "./components/LoginForm";
-import { registerUser } from "./services/register";
+import LoginForm from "./components/LoginForm";
+// import SellerPage from "./components/SellerPage";
+// import BuyerPage from "./components/BuyerPage";
 import { login } from "./services/login";
-import SellerPage from "./components/SellerPage";
-import BuyerPage from "./components/BuyerPage";
+import { registerUser } from "./services/register";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -38,17 +38,12 @@ function App() {
     try {
       const data = await login(formData.email, formData.password);
       console.log("Login response:", data);
-
-      // Store tokens - backend returns 'access' and 'refresh' directly
-      if (data.access) {
-        localStorage.setItem("access_token", data.access);
+      if (data.token) {
+        localStorage.setItem("access_token", data.token);
+        localStorage.setItem("refresh_token", data.refresh_token);
       }
-      if (data.refresh) {
-        localStorage.setItem("refresh_token", data.refresh);
-      }
-
-      // Store user data
       const userData = {
+        id: data.id,
         username: data.username,
         email: data.email,
         first_name: data.first_name,
@@ -58,15 +53,9 @@ function App() {
       };
       localStorage.setItem("user_data", JSON.stringify(userData));
       setUser(userData);
-
-      alert("Login successful!");
     } catch (error) {
-      console.error("Login error:", error);
-      if (error.response?.data?.detail) {
-        alert(`Login failed: ${error.response.data.detail}`);
-      } else {
-        alert("Login failed. Please check your credentials.");
-      }
+      console.error("Login failed:", error);
+      throw error;
     }
   };
 
@@ -76,16 +65,13 @@ function App() {
         formData.username,
         formData.email,
         formData.password,
-        formData.password_confirmation,
         formData.first_name,
         formData.last_name,
         formData.phone_number,
         formData.role
       );
       console.log("Registration response:", data);
-      // After successful registration, you might want to log them in automatically
-      // or switch to the login view
-      setShowLogin(true);
+      setShowLogin(true); // Switch to login after successful registration
       return data;
     } catch (error) {
       console.error("Registration failed:", error);
@@ -101,54 +87,75 @@ function App() {
     setShowLogin(true);
   };
 
-  const renderDashboard = () => {
-    if (!user) return null;
-
-    if (user.role === "seller") {
-      return <SellerPage user={user} onLogout={handleLogout} />;
-    } else if (user.role === "customer") {
-      return <BuyerPage user={user} onLogout={handleLogout} />;
-    } else {
-      // Role tidak dikenali
-      return (
-        <div className="dashboard-container">
-          <div className="error-container">
-            <p className="error-message">Role tidak dikenali: {user.role}</p>
-            <button className="btn-retry" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-        </div>
-      );
-    }
-  };
-
-  // Tampilkan loading sementara cek auth
   if (isCheckingAuth) {
-    return (
-      <div className="App">
-        <div className="loading-container">
-          <div className="spinner"></div>
-          <p>Memuat...</p>
-        </div>
-      </div>
-    );
+    return <div>Loading...</div>;
   }
 
   return (
     <div className="App">
       {user ? (
-        renderDashboard()
+        <div>
+          <div
+            style={{
+              padding: "20px",
+              background: "#f5f5f5",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <h2>
+              Welcome, {user.first_name}! ({user.role})
+            </h2>
+            <button
+              onClick={handleLogout}
+              style={{
+                padding: "10px 20px",
+                background: "#ff6b6b",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              Logout
+            </button>
+          </div>
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <h3>Login Successful!</h3>
+            <p>User ID: {user.id}</p>
+            <p>Username: {user.username}</p>
+            <p>Email: {user.email}</p>
+            <p>Phone: {user.phone_number}</p>
+            <p>Role: {user.role}</p>
+            <p style={{ marginTop: "20px", color: "#666" }}>
+              {user.role === "seller" ? "Seller Page" : "Buyer Page"} - Coming
+              Soon!
+            </p>
+          </div>
+        </div>
       ) : showLogin ? (
-        <Login
-          onSubmit={handleLoginSubmit}
-          onCancel={() => setShowLogin(false)}
-        />
+        <div>
+          <LoginForm
+            onLogin={handleLoginSubmit}
+            onCancel={() => setShowLogin(false)}
+          />
+          <p>
+            Don't have an account?{" "}
+            <button onClick={() => setShowLogin(false)}>Register here</button>
+          </p>
+        </div>
       ) : (
-        <RegisterForm
-          onRegister={handleRegisterSubmit}
-          onCancel={() => setShowLogin(true)}
-        />
+        <div>
+          <RegisterForm
+            onRegister={handleRegisterSubmit}
+            onCancel={() => setShowLogin(true)}
+          />
+          <p>
+            Already have an account?{" "}
+            <button onClick={() => setShowLogin(true)}>Login here</button>
+          </p>
+        </div>
       )}
     </div>
   );

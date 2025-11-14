@@ -6,7 +6,6 @@ export const registerUser = async (
   username,
   email,
   password,
-  password_confirmation,
   first_name,
   last_name,
   phone_number,
@@ -17,16 +16,15 @@ export const registerUser = async (
       username,
       email,
       password,
-      password_confirmation,
       first_name,
       last_name,
       phone_number,
       role,
     };
+    
     const response = await axios.post(`${API_URL}register/`, payload);
     return response.data;
   } catch (error) {
-    console.error("Registration error:", error);
     throw error;
   }
 };
